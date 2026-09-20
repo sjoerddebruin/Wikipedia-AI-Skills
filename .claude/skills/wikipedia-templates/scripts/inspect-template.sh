@@ -112,9 +112,12 @@ url_encode() {
 # --- Fetch basic page info (protection, pageprops) ------------------------
 fetch_page_info() {
     ENCODED_TITLE=$(url_encode "${API_TITLE}")
-    curl -s -S \
+    # -w appends the HTTP status so a blocked/throttled API can be told apart
+    # from a genuinely missing template (see the check in the main block).
+    curl -s -S -w '\n%{http_code}' \
         -H "User-Agent: ${USER_AGENT}" \
-        "${API_URL}?action=query&prop=info%7Cpageprops&inprop=protection&titles=${ENCODED_TITLE}&format=json"
+        "${API_URL}?action=query&prop=info%7Cpageprops&inprop=protection&titles=${ENCODED_TITLE}&format=json" \
+        2>/dev/null || true
 }
 
 # --- Fetch raw source -----------------------------------------------------
@@ -183,24 +186,54 @@ for pid, pdata in pages.items():
 }
 
 # --- Main -----------------------------------------------------------------
-PAGE_INFO=$(fetch_page_info)
+PAGE_RESPONSE=$(fetch_page_info)
+HTTP_CODE="${PAGE_RESPONSE##*$'\n'}"
+PAGE_INFO="${PAGE_RESPONSE%$'\n'*}"
+
+# A blocked, throttled or unreachable API must not be reported as a missing
+# template: say what actually happened instead of guessing. (This masked a CI
+# failure for weeks: the GitHub runner got an error page back, the JSON parse
+# failed, and the fallback claimed the template did not exist.)
+if [[ "$HTTP_CODE" != "200" ]]; then
+    echo "Error: API returned HTTP ${HTTP_CODE} from ${API_URL}" >&2
+    echo "  Retry later; if it persists, check the User-Agent policy" >&2
+    echo "  (see the wikimedia-api-access skill) or whether the wiki is reachable." >&2
+    exit 2
+fi
 
 # Parse page info
-PAGE_TITLE=$(echo "$PAGE_INFO" | python3 -c "
+PAGE_TITLE=$(printf '%s' "$PAGE_INFO" | python3 -c "
 import json, sys
-data = json.load(sys.stdin)
-pages = data.get('query', {}).get('pages', {})
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    sys.exit(3)
+if 'error' in data:
+    sys.exit(4)
+pages = (data.get('query') or {}).get('pages') or {}
 for pid, pdata in pages.items():
-    if pid == '-1':
+    if pid == '-1' or pdata.get('missing') is not None:
         print('NOT_FOUND')
     else:
         print(pdata.get('title', '?'))
-" 2>/dev/null || echo "NOT_FOUND")
+    break
+") || PAGE_TITLE="PARSE_ERROR"
 
-if [[ "$PAGE_TITLE" == "NOT_FOUND" ]]; then
-    echo "Error: Template '${TEMPLATE_NAME}' not found on ${WIKI}." >&2
-    exit 1
-fi
+case "$PAGE_TITLE" in
+    PARSE_ERROR)
+        echo "Error: unexpected API response from ${API_URL} (not JSON, or an API error object)" >&2
+        echo "  Usually an edge/proxy block rather than a missing template." >&2
+        exit 2
+        ;;
+    "")
+        echo "Error: unexpected API response from ${API_URL} (no page data returned)" >&2
+        exit 2
+        ;;
+    NOT_FOUND)
+        echo "Error: Template '${TEMPLATE_NAME}' not found on ${WIKI}." >&2
+        exit 1
+        ;;
+esac
 
 # --- Protection -----------------------------------------------------------
 if ! $SINGLE_VIEW || $SHOW_PROTECTION; then
