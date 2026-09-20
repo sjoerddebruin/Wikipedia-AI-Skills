@@ -30,6 +30,17 @@ production logic as the **Catapult** gadget
 Kok). It ships a generator script
 (`scripts/suggest_categories.py --item Q123 --check`).
 
+## Categories vs. gallery pages
+
+A category is a **complete, unordered, caption-less** set maintained by whoever adds to it. A Commons **gallery
+page** is the opposite: a hand-curated main-namespace page with hand-chosen images, order and captions. They are
+complements, usually paired by name (`The Venetian Macao` ↔ `Category:The Venetian Macao`).
+
+Two things worth knowing before you touch either: galleries have **no namespace, no prefix and no page property**
+(`Gallery:The Venetian Macao` is a missing page — the prefix is not an alias), and you find them by content
+(`hastemplate:"Gallery page"`), never by title. See the **[wikimedia-commons](../wikimedia-commons/SKILL.md)**
+skill's *Gallery Pages* section for the measured details and the traps.
+
 ## The pattern (memorize this)
 
 For a Wikidata person item, derive category candidates like this:
