@@ -1,6 +1,7 @@
 """Tests for the wikipedia-templates skill scripts and assets."""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -143,6 +144,16 @@ class TestTemplateUsageScript:
         assert result.returncode == 0, f"Script failed: {result.stderr}"
         assert 'Total' in result.stdout
 
+    def test_usage_reports_api_failure(self):
+        """An unreachable API must not look like 'this template is unused'."""
+        env = {**os.environ, 'WIKI': 'http://127.0.0.1:9'}
+        result = subprocess.run(
+            ['bash', str(TMPL_USAGE), 'Cn', '--limit', '5'],
+            capture_output=True, text=True, timeout=60, env=env,
+        )
+        assert result.returncode == 2, f"unexpected exit {result.returncode}: {result.stderr}"
+        assert 'HTTP' in result.stderr or 'unexpected API response' in result.stderr
+
 
 # ─── inspect-template.sh ────────────────────────────────────────────────
 
@@ -203,6 +214,21 @@ class TestInspectTemplateScript:
         )
         assert result.returncode != 0
         assert 'not found' in result.stderr.lower()
+
+    def test_inspect_reports_api_failure_not_missing_template(self):
+        """An unreachable API must not be reported as a missing template.
+
+        This masking cost a red CI for weeks: the runner got an error page, the
+        JSON parse failed, and the fallback claimed the template did not exist.
+        """
+        env = {**os.environ, 'WIKI': 'http://127.0.0.1:9'}
+        result = subprocess.run(
+            ['bash', str(TMPL_INSPECT), 'Infobox person'],
+            capture_output=True, text=True, timeout=60, env=env,
+        )
+        assert result.returncode == 2, f"unexpected exit {result.returncode}: {result.stderr}"
+        assert 'not found' not in result.stderr.lower()
+        assert 'HTTP' in result.stderr or 'unexpected API response' in result.stderr
 
 
 # ─── template-inspector.py ──────────────────────────────────────────────
